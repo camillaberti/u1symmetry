@@ -1,0 +1,13 @@
+# File generati da Julia
+*.jl.cov
+*.jl.mem
+*.jl.swp
+
+# Cartelle di compilazione e artefatti
+bin/
+dev/
+deps/build.log
+deps/deps.jl
+
+# Se usi ambienti locali dentro a sottocartelle (opzionale)
+# .julia/
