@@ -110,7 +110,10 @@ To compare, I create operators in the usual way in the full hilbert space and I 
 and check if the two results match. So I have to understand how to define the states in the vector representation that belong to the reduced super space.
 For comparison I define a function that given a number representation of a super state gives a quantum object. 
 Then I apply the builtin operator and the full operator and compare the two results. Once this is done for each element
-of the restricted super space, then I can confirm that the builtin operators are defined correctly. 
+of the restricted super space, then I can confirm that the builtin operators are defined correctly. The full operators are called left because
+they act on the ket, even if the vectorization convention in QuantumToolbox is column stacked, so the tilde space is on the left. So 
+they are called left but they act on the right (on the ket). And the full right operators actually act on the tilde space, which is first on the
+column stacked vectorization. 
 """
 
 d = prod(dims)  # full ket space dimension = 9
@@ -120,8 +123,8 @@ a1_full = tensor(destroy(3), qeye(3))   # 9×9 operator
 a2_full = tensor(qeye(3), destroy(3))   # 9×9 operator
 
 # a_1^L in the full super space (81×81), QuantumToolbox gives this directly
-a1L_full = spre(a1_full)    # (a_1 ⊗ I) in super space
-a2L_full = spre(a2_full)    # (a_2 ⊗ I) in super space
+a1L_full = spre(a1_full)    # (I ⊗ a_1) in super space (column stacked, it acts on the ket, the tilde space is on the left)
+a2L_full = spre(a2_full)    # (I ⊗ a_2 ) in super space
 
 a1R_full = spost(a1_full')   # (I ⊗ ā_1) in super space note it is the adjoint of a1_full (if a acts on the right, it acts on the bra, it will raise the number))
 a2R_full = spost(a2_full')   # (I ⊗ ā_2) in super space
@@ -135,6 +138,7 @@ N2L_full = spre(a2_full' * a2_full)
 N1R_full = spost(a1_full' * a1_full)
 N2R_full = spost(a2_full' * a2_full)
 
+#this function is needed only for full operators, the built in operators are already constructed in the reduced super space 
 function s_label_to_vecdm(ket_label, bra_label, dims) #question: do I need to construct the density matrix or is there a more direct way?
     # construct ket state |n⟩ in full space
     ψ_ket = tensor([basis(dims[i], ket_label[i]) for i in 1:length(dims)]...)
@@ -144,13 +148,14 @@ function s_label_to_vecdm(ket_label, bra_label, dims) #question: do I need to co
     return mat2vec(ψ_ket * ψ_bra')
 end
 
-for i in 1:length(super_basis), j in 1:length(super_basis)
+
+for i in 1:length(super_basis), j in 1:length(super_basis) #like a nested loop
         
     # get the number representation from the dictionary
     ket_i, bra_i, q_i = idx2super[i] #ket_i and bra_i are in number representation
     ket_j, bra_j, q_j = idx2super[j]
         
-        # build the vectorized density matrices in the full space
+        # build the vectorized density matrices in the full space, column stacked!!
     vec_ρi = s_label_to_vecdm(ket_i, bra_i, dims)
     vec_ρj = s_label_to_vecdm(ket_j, bra_j, dims)
         
@@ -169,19 +174,19 @@ for i in 1:length(super_basis), j in 1:length(super_basis)
         
     # compare
     if abs(me_full_1left - a1_left.data[i, j]) > 1e-10
-        println("MISMATCH for a1_left at ($i,$j): full=$me_full_1left, builtin=$a1_left.data[i, j]")
+        println("MISMATCH for a1_left (that acts on ket) at ($i,$j)")
     end
     if abs(me_full_2left - a2_left.data[i, j]) > 1e-10
-        println("MISMATCH for a2_left at ($i,$j): full=$me_full_2left, builtin=$a2_left.data[i, j]")
+        println("MISMATCH for a2_left at ($i,$j)")
     end
         
     if abs(me_full_1right - a1_right.data[i, j]) > 1e-10
-        println("MISMATCH for a1_right at ($i,$j): full=$me_full_1right, builtin=$a1_right.data[i, j]") 
+        println("MISMATCH for a1_right at ($i,$j)") 
         break
     end
     
     if abs(me_full_2right - a2_right.data[i, j]) > 1e-10
-        println("MISMATCH for a2_right at ($i,$j): full=$me_full_2right, builtin=$a2_right.data[i, j]") 
+        println("MISMATCH for a2_right at ($i,$j)") 
         break
     end
 
@@ -191,12 +196,13 @@ for i in 1:length(super_basis), j in 1:length(super_basis)
         println("  builtin result:   $(N1_left.data[i, j])")
         println("  ket_i=$ket_i, bra_i=$bra_i")
         println("  ket_j=$ket_j, bra_j=$bra_j")
-    break
-        break
     end
     if abs(me_full_n2left - N2_left.data[i, j]) > 1e-10
-        println("MISMATCH for N2_left at ($i,$j): full=$me_full_n2left, builtin=$N2_left.data[i, j]") 
-        break
+        println("MISMATCH for N2_left at ($i,$j)") 
+        println("  full space result:    $me_full_n2left")
+        println("  builtin result:   $(N2_left.data[i, j])")
+        println("  ket_i=$ket_i, bra_i=$bra_i")
+        println("  ket_j=$ket_j, bra_j=$bra_j")
     end
     #=
     if abs(me_full_n1right - N1_right.data[i, j]) > 1e-10
