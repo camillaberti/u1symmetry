@@ -34,12 +34,12 @@ println("Full super space: $(length(ket_basis)^2) states")
 println("Restricted super space: $(length(super_basis)) states")
 =#
 struct s_enrspace{N} #N it is a compile time constant that gives the number of sites, s_enrspace{2} and s_enrspace{3} are different types
-    total_size::Int
-    size::Int
-    target_indices::Vector{Int}
+    total_size::Int #dimension of the space including intermediate states that are not in the reduced space
+    size::Int #dimension of the reduced space (the one with |q| ≤ n_excitations)
+    target_indices::Vector{Int} #indices of the states in the full super space that are in the reduced space (the one with |q| ≤ n_excitations)
     dims::SVector{N, Int}
     n_excitations::Int
-    p::Int
+    p::Int #extended cutoff, this is Hamiltonian dependent 
     state2idx::Dict{Tuple{SVector{N,Int}, SVector{N,Int}}, Int}
     idx2state::Dict{Int, Tuple{SVector{N,Int}, SVector{N,Int}}}
 
@@ -51,7 +51,7 @@ struct s_enrspace{N} #N it is a compile time constant that gives the number of s
 end
 
 function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int) where {T <: Integer}
-    # argument checks
+    # argument checks like in enr
     L = length(dims)
     (L > 0) || throw(DomainError(dims, "dims must be non-empty"))
     all(>=(1), dims) || throw(DomainError(dims, "all elements of dims must be >= 1"))
@@ -60,7 +60,8 @@ function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_
 
     # extended cutoff: build basis for |k| ≤ n_excitations + p
     n_ext = n_excitations + p
-
+    #question: can I optimize this? Like for example by only generating the super states that satisfy |q| ≤ n_ext? 
+    #maybe there is a smarter way to do this, look at enr
     # generate all valid single-site basis states for ket and bra
     # each is a SVector of length L with n_i ∈ {0, ..., dims[i]-1}
     all_states = [SVector{L,Int}(s) for s in Iterators.product(ntuple(i -> 0:dims[i]-1, L)...)]
@@ -88,9 +89,9 @@ function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_
 end
 
 """
-step 3 is to build operator in the resticted super space. I did two functions, one for left operators and one for right. 
+step 3 is to build operator in the resticted super space. I did two functions, one for left operators and one for right. -> Compact into one
 Essentially they take two dictionaries (state => idx and idx => state) and the site (to create a1, a2 ... for each site)
-we create the matrix a_site
+we create the matrix a_site_left/right
 the operators are defined in the enlarged restricted space, so that if at an intermediate step the operators take the state out of the
 reduced space it is fine, as long as the final output is in the reduced space. 
 """
@@ -146,6 +147,27 @@ function s_destroy_left(s::s_enrspace, site::Int)
 
     return QuantumObject(sparse(I_list, J_list, V_list, D, D); type=Operator(), dims=(D,))
 end
+"""
+next step is the equivalent of enr_fock, so something like s_enr_projection that generates the projection operator for the elements 
+of the reduced space, so we can generate some initial density matrices. Questions: 
+- vectorization?
+"""
+function s_enr_projector(s_space::s_enrspace, num_list_left, num_list_right) 
+    state = (SVector(num_list_left...), SVector(num_list_right...))
+    haskey(s_space.state2idx, state) || throw(ArgumentError("state ($num_list_left, $num_list_right) not in extended super basis"))
+    i = s_space.state2idx[state]
+    i in s_space.target_indices || @warn "state is outside the symmetry blocks" 
+    d_tot = s_space.total_size
+    vec = zeros(ComplexF64, d_tot)
+    vec[i] = 1.
+
+    return QuantumObject(vec; type=OperatorKet(), dims = (d_tot,))
+end
+
+function s_enr_projector(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int, num_list_left, num_list_right) where {T <: Integer}
+    s = s_enrspace(dims, n_excitations, p)    
+    return s_enr_projector(s, num_list_left, num_list_right)
+end
 
 end #end of module
-#define reduced space and operators in it
+
