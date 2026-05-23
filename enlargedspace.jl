@@ -2,10 +2,12 @@ module SuperEnrSpace #not sure if I need this
 
 
 using QuantumToolbox
+import QuantumToolbox: dimensions_to_dims
 using StaticArrays
 using SparseArrays
+#import QuantumToolbox: get_size, dimensions_to_dims 
 
-export s_enrspace, s_destroy_left, s_destroy_right
+export s_enrspace, s_destroy_left, s_destroy_right, s_enr_projector
 """
 create super space with k = 0,1,-1 
 we create two dictionaries: super2idx takes a tuple (state, tilde state) 
@@ -13,27 +15,8 @@ we create two dictionaries: super2idx takes a tuple (state, tilde state)
 and gives the index, 
 idx2super takes the index and gives the super state
 """
-#=
-n_exc = 1  # max |q|
 
-super_basis = []
-for (i, ket) in enumerate(ket_basis)
-    for (j, bra) in enumerate(ket_basis)
-        q = sum(ket) - sum(bra)
-        if abs(q) <= n_exc
-            push!(super_basis, (ket, bra, q)) 
-        end
-    end
-end
-
-# assign indices
-super2idx = Dict((s[1], s[2]) => i for (i,s) in enumerate(super_basis)) #s[1] and s[2] are the states in number repr of the ket and bra(tilde)
-idx2super = Dict(i => s for (i,s) in enumerate(super_basis))
-#println(super_basis)
-println("Full super space: $(length(ket_basis)^2) states")
-println("Restricted super space: $(length(super_basis)) states")
-=#
-struct s_enrspace{N} #N it is a compile time constant that gives the number of sites, s_enrspace{2} and s_enrspace{3} are different types
+struct s_enrspace{N} <: QuantumToolbox.AbstractSpace #N it is a compile time constant that gives the number of sites, s_enrspace{2} and s_enrspace{3} are different types
     total_size::Int #dimension of the space including intermediate states that are not in the reduced space
     size::Int #dimension of the reduced space (the one with |q| ≤ n_excitations)
     target_indices::Vector{Int} #indices of the states in the full super space that are in the reduced space (the one with |q| ≤ n_excitations)
@@ -48,7 +31,14 @@ struct s_enrspace{N} #N it is a compile time constant that gives the number of s
         L = length(dims)
         return new{L}(total_size, size, target_indices, SVector{L}(dims), n_excitations, p, state2idx, idx2state)
     end
+    
 end
+#minimal interface needed to make it work
+#QuantumToolbox.get_size(s::s_enrspace) = s.total_size
+Base.length(::s_enrspace{N}) where {N} = N #like enr_space
+Base.:(==)(s1::s_enrspace, s2::s_enrspace) = (s1.total_size == s2.total_size) && (s1.dims == s2.dims) #it defines when 2 super spaces are equal
+#dimensions_to_dims(s::s_enrspace) = [s.total_size]
+dimensions_to_dims(s::s_enrspace) = SVector{1,Int}(s.total_size) #important to think about this!!!
 
 function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int) where {T <: Integer}
     # argument checks like in enr
@@ -153,15 +143,17 @@ of the reduced space, so we can generate some initial density matrices. Question
 - vectorization?
 """
 function s_enr_projector(s_space::s_enrspace, num_list_left, num_list_right) 
-    state = (SVector(num_list_left...), SVector(num_list_right...))
+    state = (SVector(num_list_left...), SVector(num_list_right...)) #... splat operators, this becomes SVector(2,1,0) for example
     haskey(s_space.state2idx, state) || throw(ArgumentError("state ($num_list_left, $num_list_right) not in extended super basis"))
     i = s_space.state2idx[state]
     i in s_space.target_indices || @warn "state is outside the symmetry blocks" 
     d_tot = s_space.total_size
     vec = zeros(ComplexF64, d_tot)
     vec[i] = 1.
+    liouv_dims = Dimensions(LiouvilleSpace(Dimensions(s_space)), Space(1)) #to match dimensions of operatorket type 
 
-    return QuantumObject(vec; type=OperatorKet(), dims = (d_tot,))
+    return QuantumObject(vec; type=OperatorKet(), dims=liouv_dims)
+
 end
 
 function s_enr_projector(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int, num_list_left, num_list_right) where {T <: Integer}
