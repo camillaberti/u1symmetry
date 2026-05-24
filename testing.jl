@@ -34,8 +34,10 @@ end
     space = s_enrspace(dims, n_exc, p)
 
     # Build Reduced Operators
-    a_left = [s_destroy_left(space, i) for i in 1:3]
-    a_right = [s_destroy_right(space, i) for i in 1:3]
+
+    results = [s_destroy(space, i) for i in 1:3]
+    a_left = [r[1] for r in results]
+    a_right = [r[2] for r in results]
     N_left = [a_left[i]' * a_left[i] for i in 1:3]
     N_right = [a_right[i]' * a_right[i] for i in 1:3]
 

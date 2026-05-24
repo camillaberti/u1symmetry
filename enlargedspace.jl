@@ -1,13 +1,12 @@
 module SuperEnrSpace #not sure if I need this
 
-
 using QuantumToolbox
 #import QuantumToolbox: dimensions_to_dims, Dimensions, LiouvilleSpace, Space, get_size
 using StaticArrays
 using SparseArrays
 #import QuantumToolbox: get_size, dimensions_to_dims 
 
-export s_enrspace, s_destroy_left, s_destroy_right, s_enr_projector
+export s_enrspace, s_destroy, s_enr_projector, s_identity
 """
 create super space with k = 0,1,-1 
 we create two dictionaries: super2idx takes a tuple (state, tilde state) 
@@ -87,57 +86,47 @@ the operators are defined in the enlarged restricted space, so that if at an int
 reduced space it is fine, as long as the final output is in the reduced space. 
 """
 
-function s_destroy_right(s::s_enrspace, site::Int) #inspired by enr_destroy
-    D = s.total_size # dimension of enlarged reduced hilbert space
-    idx2super = s.idx2state
-    super2idx = s.state2idx
-    I_list, J_list, V_list = Int[], Int[], ComplexF64[]
-    
-
-    for (j, (ket, bra)) in idx2super 
-        n_k = bra[site] #ask bc in julia the vectorization is column stacked, so the tilde space is on the left
-        if n_k > 0                           # same check as enr_destroy: s > 0
-            new_bra = setindex(bra, n_k-1, site) #returns a new vector (new_bra) with value nk-1 at index "site"
-            new_key = (ket, new_bra)
-            #check if the output is in the enlarged restricted basis. If so, we fill a matrix element
-            # I would keep it even for the enlarged space for safety and to control the maximum dimension
-            if haskey(super2idx, new_key) 
-                i = super2idx[new_key]
-                push!(I_list, i)
-                push!(J_list, j)
-                push!(V_list, sqrt(ComplexF64(n_k)))
-            end
-        end
-    end
-
-    return QuantumObject(sparse(I_list, J_list, V_list, D, D); type=Operator(), dims=(D,))
-    
-end
-
-
-function s_destroy_left(s::s_enrspace, site::Int)
+function s_destroy(s::s_enrspace, site::Int)
     D = s.total_size # dimension of reduced hilbert space
     idx2super = s.idx2state
     super2idx = s.state2idx
-    I_list, J_list, V_list = Int[], Int[], ComplexF64[]
-    
+    I_list_left, J_list_left, V_list_left = Int[], Int[], ComplexF64[]
+    I_list_right, J_list_right, V_list_right = Int[], Int[], ComplexF64[]
 
     for (j, (ket, bra)) in idx2super
-        n_k = ket[site]
-        if n_k > 0                           # same check as enr_destroy: s > 0
-            new_ket = setindex(ket, n_k-1, site) #returns a new vector (new_ket) with value nk-1 at index site
-            new_key = (new_ket, bra)
-            if haskey(super2idx, new_key)    # check output is in restricted basis
-                i = super2idx[new_key]
-                push!(I_list, i)
-                push!(J_list, j)
-                push!(V_list, sqrt(ComplexF64(n_k)))
+        n_l = ket[site]
+        n_r = bra[site]
+        if n_l > 0                           # same check as enr_destroy: s > 0
+            new_ket = setindex(ket, n_l-1, site) #returns a new vector (new_ket) with value nk-1 at index site
+            new_key_l = (new_ket, bra)
+            if haskey(super2idx, new_key_l)    # check output is in restricted basis
+                i = super2idx[new_key_l]
+                push!(I_list_left, i)
+                push!(J_list_left, j)
+                push!(V_list_left, sqrt(ComplexF64(n_l)))
+            end
+        end
+        if n_r > 0
+            new_bra = setindex(bra, n_r-1, site)
+            new_key_r = (ket, new_bra)
+            if haskey(super2idx, new_key_r)
+                i = super2idx[new_key_r]
+                push!(I_list_right, i)
+                push!(J_list_right, j)
+                push!(V_list_right, sqrt(ComplexF64(n_r)))
             end
         end
     end
-
-    return QuantumObject(sparse(I_list, J_list, V_list, D, D); type=Operator(), dims=(D,))
+    a_left = QuantumObject(sparse(I_list_left, J_list_left, V_list_left, D, D); type=Operator(), dims=(D,))
+    a_right = QuantumObject(sparse(I_list_right, J_list_right, V_list_right, D, D); type=Operator(), dims=(D,))
+    return (a_left, a_right)
 end
+
+function s_destroy(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int, site::Int) where {T <: Integer}
+    s = s_enrspace(dims, n_excitations, p)
+    return s_destroy(s, site)
+end
+
 """
 next step is the equivalent of enr_fock, so something like s_enr_projection that generates the projection operator for the elements 
 of the reduced space, so we can generate some initial density matrices. Questions: 
@@ -161,6 +150,21 @@ function s_enr_projector(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_exc
     s = s_enrspace(dims, n_excitations, p)    
     return s_enr_projector(s, num_list_left, num_list_right)
 end
-
+"""
+last step: function that creates a vectorized identity in the reduced superspace. 
+This is needed as a sanity check (we can see if <I|L = 0) holds in the reduced space, 
+and we can compute expectation values thanks to it 
+(reminder that for a generic observable O, <O> = Tr(Oρ) = <I|Oρ|I> = <I|O|ρ>)
+"""
+function s_identity(s::s_enrspace)
+    d = s.total_size #can I construct it only in the blocks I care about? For now let's keep it enlarged
+    vec_id = zeros(ComplexF64, d)
+    for (j, (ket, bra)) in s.idx2state
+        if ket == bra
+            vec_id[j] = 1.
+        end
+    end
+    return QuantumObject(vec_id; type=Ket(), dims = d)
+end
 end #end of module
 
