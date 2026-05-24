@@ -2,7 +2,7 @@ module SuperEnrSpace #not sure if I need this
 
 
 using QuantumToolbox
-import QuantumToolbox: dimensions_to_dims
+#import QuantumToolbox: dimensions_to_dims, Dimensions, LiouvilleSpace, Space, get_size
 using StaticArrays
 using SparseArrays
 #import QuantumToolbox: get_size, dimensions_to_dims 
@@ -33,13 +33,14 @@ struct s_enrspace{N} <: QuantumToolbox.AbstractSpace #N it is a compile time con
     end
     
 end
-#minimal interface needed to make it work
+
 #QuantumToolbox.get_size(s::s_enrspace) = s.total_size
 Base.length(::s_enrspace{N}) where {N} = N #like enr_space
 Base.:(==)(s1::s_enrspace, s2::s_enrspace) = (s1.total_size == s2.total_size) && (s1.dims == s2.dims) #it defines when 2 super spaces are equal
 #dimensions_to_dims(s::s_enrspace) = [s.total_size]
-dimensions_to_dims(s::s_enrspace) = SVector{1,Int}(s.total_size) #important to think about this!!!
-
+#the following two functions were needed for OperatorKet() type
+#dimensions_to_dims(s::s_enrspace) = SVector{1,Int}(s.total_size) #important to think about this!!!
+#get_size(s::s_enrspace) = s.total_size
 function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int) where {T <: Integer}
     # argument checks like in enr
     L = length(dims)
@@ -150,9 +151,9 @@ function s_enr_projector(s_space::s_enrspace, num_list_left, num_list_right)
     d_tot = s_space.total_size
     vec = zeros(ComplexF64, d_tot)
     vec[i] = 1.
-    liouv_dims = Dimensions(LiouvilleSpace(Dimensions(s_space)), Space(1)) #to match dimensions of operatorket type 
+    
 
-    return QuantumObject(vec; type=OperatorKet(), dims=liouv_dims)
+    return QuantumObject(vec; type=Ket(), dims=d_tot)
 
 end
 
