@@ -1,15 +1,13 @@
 module SuperEnrSpace #not sure if I need this
 
 using QuantumToolbox
-#import QuantumToolbox: dimensions_to_dims, Dimensions, LiouvilleSpace, Space, get_size
 using StaticArrays
 using SparseArrays
-#import QuantumToolbox: get_size, dimensions_to_dims 
 
-export s_enrspace, s_destroy, s_enr_projector, s_identity
+export s_enrspace, s_destroy, s_enr_projector, s_identity, project_to_target, s_enr_liouvillian
 """
-create super space with k = 0,1,-1 
-we create two dictionaries: super2idx takes a tuple (state, tilde state) 
+create super space:
+two dictionaries are created: super2idx takes a tuple (state, tilde state) 
 (so the key is the state in super number representation)
 and gives the index, 
 idx2super takes the index and gives the super state
@@ -33,13 +31,9 @@ struct s_enrspace{N} <: QuantumToolbox.AbstractSpace #N it is a compile time con
     
 end
 
-#QuantumToolbox.get_size(s::s_enrspace) = s.total_size
 Base.length(::s_enrspace{N}) where {N} = N #like enr_space
 Base.:(==)(s1::s_enrspace, s2::s_enrspace) = (s1.total_size == s2.total_size) && (s1.dims == s2.dims) #it defines when 2 super spaces are equal
-#dimensions_to_dims(s::s_enrspace) = [s.total_size]
-#the following two functions were needed for OperatorKet() type
-#dimensions_to_dims(s::s_enrspace) = SVector{1,Int}(s.total_size) #important to think about this!!!
-#get_size(s::s_enrspace) = s.total_size
+
 function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int) where {T <: Integer}
     # argument checks like in enr
     L = length(dims)
@@ -79,7 +73,7 @@ function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_
 end
 
 """
-step 3 is to build operator in the resticted super space. I did two functions, one for left operators and one for right. -> Compact into one
+Next step: build destroy operators in the resticted super space. 
 Essentially they take two dictionaries (state => idx and idx => state) and the site (to create a1, a2 ... for each site)
 we create the matrix a_site_left/right
 the operators are defined in the enlarged restricted space, so that if at an intermediate step the operators take the state out of the
@@ -87,7 +81,7 @@ reduced space it is fine, as long as the final output is in the reduced space.
 """
 
 function s_destroy(s::s_enrspace, site::Int)
-    D = s.total_size # dimension of reduced hilbert space
+    D = s.total_size 
     idx2super = s.idx2state
     super2idx = s.state2idx
     I_list_left, J_list_left, V_list_left = Int[], Int[], ComplexF64[]
@@ -132,18 +126,32 @@ next step is the equivalent of enr_fock, so something like s_enr_projection that
 of the reduced space, so we can generate some initial density matrices. Questions: 
 - vectorization?
 """
-function s_enr_projector(s_space::s_enrspace, num_list_left, num_list_right) 
+
+function project_to_target(op::QuantumObject, s::s_enrspace)
+    idx = s.target_indices
+    new_data = op.data[idx, idx]
+    d = s.size
+    return QuantumObject(new_data; type = Operator(), dims = (d,))
+end
+
+function s_enr_projector(s::s_enrspace, num_list_left, num_list_right; project::Bool=true) 
     state = (SVector(num_list_left...), SVector(num_list_right...)) #... splat operators, this becomes SVector(2,1,0) for example
     haskey(s_space.state2idx, state) || throw(ArgumentError("state ($num_list_left, $num_list_right) not in extended super basis"))
-    i = s_space.state2idx[state]
-    i in s_space.target_indices || @warn "state is outside the symmetry blocks" 
-    d_tot = s_space.total_size
-    vec = zeros(ComplexF64, d_tot)
-    vec[i] = 1.
-    
+    i = s.state2idx[state]
 
-    return QuantumObject(vec; type=Ket(), dims=d_tot)
-
+    if project
+        i in s.target_indices || throw(ArgumentError("state ($num_list_left, $num_list_right) is outside target blocks; use project=false to access it"))
+        target_pos = findfirst(==(i), s.target_indices)
+        d_r = s.size
+        vec = zeros(ComplexF64, d_r)
+        vec[target_pos] = 1.
+        return QuantumObject(vec; type=Ket(), dims=(d_r,))
+    else
+        d_tot = s.total_size
+        vec = zeros(ComplexF64, d_tot)
+        vec[i] = 1.
+        return QuantumObject(vec; type=Ket(), dims=(d_tot,))
+    end
 end
 
 function s_enr_projector(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int, num_list_left, num_list_right) where {T <: Integer}
@@ -156,7 +164,7 @@ This is needed as a sanity check (we can see if <I|L = 0) holds in the reduced s
 and we can compute expectation values thanks to it 
 (reminder that for a generic observable O, <O> = Tr(Oρ) = <I|Oρ|I> = <I|O|ρ>)
 """
-function s_identity(s::s_enrspace)
+function s_identity(s::s_enrspace; project::Bool=true)
     d = s.total_size #can I construct it only in the blocks I care about? For now let's keep it enlarged
     vec_id = zeros(ComplexF64, d)
     for (j, (ket, bra)) in s.idx2state
@@ -164,7 +172,23 @@ function s_identity(s::s_enrspace)
             vec_id[j] = 1.
         end
     end
-    return QuantumObject(vec_id; type=Ket(), dims = d)
+    if project
+        vec_r = vec_id[s.target_indices]
+        d_r = s.size
+        return QuantumObject(vec_r; type=Ket(), dims =(d_r,))
+    else
+        return QuantumObject(vec_id; type=Ket(), dims = d)
+    end
 end
+
+
+function s_enr_liouvillian(s::s_enrspace, H_left, H_right, c_ops_lr; project::Bool=true)
+    L = -1im * (H_left - H_right)
+    for (c_left, c_right) in c_ops_lr
+        L += c_left * c_right - 0.5 * (c_left)' * c_left - 0.5 * (c_right)' * c_right
+    end
+    return project ? project_to_target(L, s) : L
+end
+
 end #end of module
 
