@@ -3,8 +3,9 @@ module SuperEnrSpace #not sure if I need this
 using QuantumToolbox
 using StaticArrays
 using SparseArrays
+using LinearAlgebra
 
-export s_enrspace, s_destroy, s_enr_projector, s_identity, project_to_target, s_enr_liouvillian
+export s_enrspace, s_destroy, s_enr_projector, s_identity, project_to_target, s_enr_liouvillian, s_mesolve
 """
 create super space:
 two dictionaries are created: super2idx takes a tuple (state, tilde state) 
@@ -136,7 +137,7 @@ end
 
 function s_enr_projector(s::s_enrspace, num_list_left, num_list_right; project::Bool=true) 
     state = (SVector(num_list_left...), SVector(num_list_right...)) #... splat operators, this becomes SVector(2,1,0) for example
-    haskey(s_space.state2idx, state) || throw(ArgumentError("state ($num_list_left, $num_list_right) not in extended super basis"))
+    haskey(s.state2idx, state) || throw(ArgumentError("state ($num_list_left, $num_list_right) not in extended super basis"))
     i = s.state2idx[state]
 
     if project
@@ -189,6 +190,39 @@ function s_enr_liouvillian(s::s_enrspace, H_left, H_right, c_ops_lr; project::Bo
     end
     return project ? project_to_target(L, s) : L
 end
+
+function s_mesolve(L::QuantumObject, ρ0::QuantumObject, tlist, observables, vec_id::QuantumObject;
+                   method::Symbol=:eigen)
+    L_mat = Matrix(L.data)
+    ρ0_vec = ρ0.data
+    id_vec = vec_id.data
+
+    results = zeros(ComplexF64, length(observables), length(tlist))
+
+    if method == :eigen
+        F = eigen(L_mat)
+        D_eig, V = F.values, F.vectors
+        Vinv = inv(V)
+        c0 = Vinv * ρ0_vec
+
+        for (it, t) in enumerate(tlist)
+            ρ_t = V * (exp.(D_eig * t) .* c0)
+            for (io, O) in enumerate(observables)
+                results[io, it] = dot(id_vec, O.data * ρ_t)
+            end
+        end
+    else  # :exp
+        for (it, t) in enumerate(tlist)
+            ρ_t = exp(L_mat * t) * ρ0_vec
+            for (io, O) in enumerate(observables)
+                results[io, it] = dot(id_vec, O.data * ρ_t)
+            end
+        end
+    end
+
+    return results
+end
+
 
 end #end of module
 
