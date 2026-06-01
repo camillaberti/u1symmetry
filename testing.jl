@@ -16,7 +16,7 @@ column stacked vectorization.
 """
 
 #this function is needed only for full operators, the built in operators are already constructed in the reduced super space 
-function s_label_to_vecdm(ket_label, bra_label, dims) #question: do I need to construct the density matrix or is there a more direct way?
+function s_label_to_vecdm(ket_label, bra_label, dims) 
     # construct ket state |n⟩ in full space
     ψ_ket = tensor([basis(dims[i], ket_label[i]) for i in 1:length(dims)]...)
     # construct bra state |m⟩ in full space  
