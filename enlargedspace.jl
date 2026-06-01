@@ -5,7 +5,7 @@ using StaticArrays
 using SparseArrays
 using LinearAlgebra
 
-export s_enrspace, s_destroy, s_enr_projector, s_identity, project_to_target, s_enr_liouvillian, s_mesolve
+export s_enrspace, s_destroy, s_enr_projector, s_identity, project_to_target, s_enr_liouvillian, s_mesolve, SuperEnrTimeEvolution
 """
 create super space:
 two dictionaries are created: super2idx takes a tuple (state, tilde state) 
@@ -191,6 +191,13 @@ function s_enr_liouvillian(s::s_enrspace, H_left, H_right, c_ops_lr; project::Bo
     return project ? project_to_target(L, s) : L
 end
 
+struct SuperEnrTimeEvolution
+    times::AbstractVector
+    states::Vector{QuantumObject}   # ρ(t) at each time, always returned
+    expect::Union{Matrix{ComplexF64}, Nothing}  # nothing if no observables passed
+    alg::Symbol
+end
+#=
 function s_mesolve(L::QuantumObject, ρ0::QuantumObject, tlist, observables, vec_id::QuantumObject;
                    method::Symbol=:eigen)
     L_mat = Matrix(L.data)
@@ -222,7 +229,53 @@ function s_mesolve(L::QuantumObject, ρ0::QuantumObject, tlist, observables, vec
 
     return results
 end
+=#
+function s_mesolve(L::QuantumObject, ρ0::QuantumObject, tlist, vec_id::QuantumObject;
+                   observables=nothing, method::Symbol=:eigen)
+    L_mat = Matrix(L.data)
+    ρ0_vec = ρ0.data
+    id_vec = vec_id.data
 
+    nT = length(tlist)
+    states = Vector{QuantumObject}(undef, nT)
+
+    # preallocate expectation values only if observables are passed
+    if observables !== nothing
+        nO = length(observables)
+        results = zeros(ComplexF64, nO, nT)
+    end
+
+    if method == :eigen
+        F = eigen(L_mat)
+        D_eig, V = F.values, F.vectors
+        Vinv = inv(V)
+        c0 = Vinv * ρ0_vec
+
+        for (it, t) in enumerate(tlist)
+            ρ_t = V * (exp.(D_eig * t) .* c0)
+            states[it] = QuantumObject(ρ_t; type=Ket(), dims=(length(ρ_t),))
+            if observables !== nothing
+                for (io, O) in enumerate(observables)
+                    results[io, it] = dot(id_vec, O.data * ρ_t)
+                end
+            end
+        end
+
+    else  # :exp
+        for (it, t) in enumerate(tlist)
+            ρ_t = exp(L_mat * t) * ρ0_vec
+            states[it] = ρ_t
+            if observables !== nothing
+                for (io, O) in enumerate(observables)
+                    results[io, it] = dot(id_vec, O.data * ρ_t)
+                end
+            end
+        end
+    end
+
+    expect = observables !== nothing ? results : nothing
+    return SuperEnrTimeEvolution(tlist, states, expect, method)
+end
 
 end #end of module
 
