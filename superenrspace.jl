@@ -40,8 +40,8 @@ function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_
     L = length(dims)
     (L > 0) || throw(DomainError(dims, "dims must be non-empty"))
     all(>=(1), dims) || throw(DomainError(dims, "all elements of dims must be >= 1"))
-    (n_excitations >= 0) || throw(DomainError(n_excitations, "n_excitations must be >= 0")) #to be checked, n_exc can be zero
-    (p >= 0) || throw(DomainError(p, "p must be >= 0")) #to be checked 
+    (n_excitations >= 0) || throw(DomainError(n_excitations, "n_excitations must be >= 0")) 
+    (p >= 1) || throw(DomainError(p, "p must be >= 1")) #to be checked 
 
     # extended cutoff: build basis for |k| ≤ n_excitations + p
     n_ext = n_excitations + p
