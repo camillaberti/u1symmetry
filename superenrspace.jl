@@ -18,6 +18,7 @@ struct s_enrspace{N} <: QuantumToolbox.AbstractSpace #N it is a compile time con
     total_size::Int #dimension of the space including intermediate states that are not in the reduced space
     size::Int #dimension of the reduced space (the one with |q| ≤ n_excitations)
     target_indices::Vector{Int} #indices of the states in the full super space that are in the reduced space (the one with |q| ≤ n_excitations)
+    blocks::Dict{Int, UnitRange{Int}}
     dims::SVector{N, Int}
     n_excitations::Int
     p::Int #extended cutoff, this is Hamiltonian dependent 
@@ -25,23 +26,24 @@ struct s_enrspace{N} <: QuantumToolbox.AbstractSpace #N it is a compile time con
     idx2state::Dict{Int, Tuple{SVector{N,Int}, SVector{N,Int}}}
 
     function s_enrspace(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int) where {T <: Integer}
-        total_size, size, target_indices, state2idx, idx2state = s_enr_dictionaries(dims, n_excitations, p) #size is the dimension of the reduced (enlarged) space
+        total_size, size, target_indices, blocks, state2idx, idx2state = s_enr_dictionaries(dims, n_excitations, p) #size is the dimension of the reduced (enlarged) space
         L = length(dims)
-        return new{L}(total_size, size, target_indices, SVector{L}(dims), n_excitations, p, state2idx, idx2state)
+        return new{L}(total_size, size, target_indices, blocks, SVector{L}(dims), n_excitations, p, state2idx, idx2state)
     end
     
 end
 
 Base.length(::s_enrspace{N}) where {N} = N #like enr_space
 Base.:(==)(s1::s_enrspace, s2::s_enrspace) = (s1.total_size == s2.total_size) && (s1.dims == s2.dims) #it defines when 2 super spaces are equal
-
+#old version 
+#=
 function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int) where {T <: Integer}
     # argument checks like in enr
     L = length(dims)
     (L > 0) || throw(DomainError(dims, "dims must be non-empty"))
     all(>=(1), dims) || throw(DomainError(dims, "all elements of dims must be >= 1"))
     (n_excitations >= 0) || throw(DomainError(n_excitations, "n_excitations must be >= 0")) 
-    (p >= 1) || throw(DomainError(p, "p must be >= 1")) #to be checked 
+    (p >= 1) || throw(DomainError(p, "p must be >= 1")) 
 
     # extended cutoff: build basis for |k| ≤ n_excitations + p
     n_ext = n_excitations + p
@@ -72,6 +74,85 @@ function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_
 
     return enlarged_size, size, target_indices, state2idx, idx2state
 end
+=#
+
+
+function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int) where {T <: Integer}
+    # argument checks like in enr
+    L = length(dims)
+    (L > 0) || throw(DomainError(dims, "dims must be non-empty"))
+    all(>=(1), dims) || throw(DomainError(dims, "all elements of dims must be >= 1"))
+    (n_excitations >= 0) || throw(DomainError(n_excitations, "n_excitations must be >= 0")) 
+    (p >= 1) || throw(DomainError(p, "p must be >= 1")) 
+
+    # extended cutoff: build basis for |k| ≤ n_excitations + p
+    n_ext = n_excitations + p
+    ranges = ntuple(i -> 0:dims[i]-1, L) #ranges for the occupation numbers of each site
+    hilbert_states = vec(collect(Iterators.product(ranges...))) #all possible states in the Hilbert space
+    m_vals = map(sum, hilbert_states) # compute m for each state, needed to sort the states by m
+    m_perm = sortperm(m_vals)
+    hilbert_states = hilbert_states[m_perm]
+    m_vals = m_vals[m_perm]
+    N = length(hilbert_states)
+    m_max = maximum(m_vals)
+    # create a dictionary that store the starting index and how many states are there for the specific m value: 
+    #m_dict[m] = (start_index, count)
+    m_dict = Dict{Int, Tuple{Int, Int}}() 
+    #filling the dictionary 
+    i = 1 #julia counting starts from 1
+    while i <= N
+        m = m_vals[i]
+        start_index = i
+        while i <= N && m_vals[i] == m
+            i += 1
+        end
+        m_dict[m] = (start_index, i - start_index)
+    end
+
+    #block ordering for the super space, the ordering will be q = 0, -1, +1, -2, +2 and so on
+    q_order = Int[0]
+    for k in 1:n_ext
+        push!(q_order, -k, +k)
+    end
+
+    state2idx = Dict{Tuple{SVector{L,Int}, SVector{L,Int}}, Int}()
+    idx2state = Dict{Int, Tuple{SVector{L,Int}, SVector{L,Int}}}()
+
+    #preallocate memory, it should optimize performances
+    sizehint!(state2idx, N^2)
+    sizehint!(idx2state, N^2)
+    idx = 1
+    size = 0 #size of the reduced space, it will be updated as the dictionaries are filled 
+    dict_blocks = Dict{Int, UnitRange{Int}}() 
+    for q in q_order 
+        q_start = idx      
+        for m in 0:m_max
+            n = m-q 
+            (0 <= n <= m_max) || continue
+            m_start, m_count = m_dict[m]
+            n_start, n_count = m_dict[n]
+            for i in m_start:(m_start + m_count - 1)
+                for j in n_start:(n_start + n_count - 1)
+                    superstate = (SVector{L,Int}(hilbert_states[i]), SVector{L,Int}(hilbert_states[j]))
+                    state2idx[superstate] = idx
+                    idx2state[idx] = superstate
+                    idx += 1
+                    abs(q) <= n_excitations && (size += 1)
+                end
+            end
+        end
+        if idx > q_start
+            dict_blocks[q] = q_start:(idx-1) #store the range of indices for the block with charge q
+        end
+    end
+    enlarged_size = idx - 1  
+
+    return enlarged_size, size, 1:size, dict_blocks, state2idx, idx2state
+end
+
+
+
+
 
 """
 Next step: build destroy operators in the resticted super space. 
@@ -178,7 +259,7 @@ function s_identity(s::s_enrspace; project::Bool=true)
         d_r = s.size
         return QuantumObject(vec_r; type=Ket(), dims =(d_r,))
     else
-        return QuantumObject(vec_id; type=Ket(), dims = d)
+        return QuantumObject(vec_id; type=Ket(), dims =(d,))
     end
 end
 
@@ -264,7 +345,7 @@ function s_mesolve(L::QuantumObject, ρ0::QuantumObject, tlist, vec_id::QuantumO
     else  # :exp
         for (it, t) in enumerate(tlist)
             ρ_t = exp(L_mat * t) * ρ0_vec
-            states[it] = ρ_t
+            states[it] = QuantumObject(ρ_t; type=Ket(), dims=(length(ρ_t),))
             if observables !== nothing
                 for (io, O) in enumerate(observables)
                     results[io, it] = dot(id_vec, O.data * ρ_t)

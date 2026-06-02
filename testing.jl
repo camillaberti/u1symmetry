@@ -1,6 +1,6 @@
 using Test
 using QuantumToolbox
-include("enlargedspace.jl")
+include("superenrspace.jl")
 using .SuperEnrSpace
 
 """
