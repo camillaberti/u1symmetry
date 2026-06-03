@@ -31,11 +31,11 @@ end
     n_exc = 1
     p = 2
     cutoff = dims[1]
-    space = s_enrspace(dims, n_exc, p)
+    space = s_enr_space(dims, n_exc, p)
 
     # Build Reduced Operators
 
-    results = [s_destroy(space, i) for i in 1:3]
+    results = [s_enr_destroy(space, i) for i in 1:3]
     a_left = [r[1] for r in results]
     a_right = [r[2] for r in results]
     N_left = [a_left[i]' * a_left[i] for i in 1:3]
@@ -53,11 +53,11 @@ end
     a2L_full = [spre(op)    for op in a2_full]
     a2R_full = [spost(op')  for op in a2_full]
 
-    target_indices = space.target_indices
+    d = space.size
     idx2super = space.idx2state
 
     @testset "Matrix Element Comparison" begin
-        for i in target_indices, j in target_indices
+        for i in 1:d, j in 1:d
             ket_i, bra_i = idx2super[i]
             ket_j, bra_j = idx2super[j]
             
