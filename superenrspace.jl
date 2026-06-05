@@ -1,4 +1,4 @@
-module SuperEnrSpace #not sure if I need this
+module SuperEnrSpace 
 
 using QuantumToolbox
 using StaticArrays
@@ -16,11 +16,11 @@ idx2super takes the index and gives the super state
 
 struct s_enr_space{N} <: QuantumToolbox.AbstractSpace #N it is a compile time constant that gives the number of sites, s_enrspace{2} and s_enrspace{3} are different types
     total_size::Int #dimension of the space including intermediate states that are not in the reduced space
-    size::Int #dimension of the reduced space (the one with |q| ≤ n_excitations)
+    size::Int #dimension of the reduced space (the one with |k| ≤ n_excitations)
     blocks::Dict{Int, UnitRange{Int}}
     dims::SVector{N, Int}
     n_excitations::Int
-    p::Int #extended cutoff, this is Hamiltonian dependent 
+    p::Int #extended cutoff, this is Liouvillian dependent 
     state2idx::Dict{Tuple{SVector{N,Int}, SVector{N,Int}}, Int}
     idx2state::Dict{Int, Tuple{SVector{N,Int}, SVector{N,Int}}}
 
@@ -33,10 +33,10 @@ struct s_enr_space{N} <: QuantumToolbox.AbstractSpace #N it is a compile time co
 end
 
 Base.length(::s_enr_space{N}) where {N} = N #like enr_space
-Base.:(==)(s1::s_enr_space, s2::s_enr_space) = (s1.total_size == s2.total_size) && (s1.dims == s2.dims) #it defines when 2 super spaces are equal
+Base.:(==)(s1::s_enr_space, s2::s_enr_space) = (s1.total_size == s2.total_size) && (s1.size == s2.size) && (s1.dims == s2.dims) #it defines when 2 super spaces are equal
 
 function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_excitations::Int, p::Int) where {T <: Integer}
-    # argument checks like in enr
+    # argument checks 
     L = length(dims)
     (L > 0) || throw(DomainError(dims, "dims must be non-empty"))
     all(>=(1), dims) || throw(DomainError(dims, "all elements of dims must be >= 1"))
@@ -67,7 +67,7 @@ function s_enr_dictionaries(dims::Union{AbstractVector{T}, Tuple{Vararg{T}}}, n_
         m_dict[m] = (start_index, i - start_index)
     end
 
-    #block ordering for the super space, the ordering will be q = 0, -1, +1, -2, +2 and so on
+    #block ordering for the super space, the ordering will be k = 0, -1, +1, -2, +2 and so on
     q_order = Int[0]
     for k in 1:n_ext
         push!(q_order, -k, +k)
@@ -159,8 +159,7 @@ end
 
 """
 next step is the equivalent of enr_fock, so something like s_enr_projection that generates the projection operator for the elements 
-of the reduced space, so we can generate some initial density matrices. Questions: 
-- vectorization?
+of the reduced space, so we can generate some initial density matrices. 
 """
 
 function project_to_target(op::QuantumObject, s::s_enr_space)
